@@ -116,31 +116,39 @@ def record_audio(max_duration, filename):
     return True
 
 def transcribe_and_save(audio_file, model_type):
-    # Determine device based on user preference and availability
+    # Step 1: Determine device
     if USE_MPS and torch.backends.mps.is_available():
         device = "mps"
     else:
         device = "cpu"
     
+    # Step 2: Precision Optimization
+    # CPUs do not support FP16. Using FP16 on CPU causes a slow conversion delay.
+    # We set fp16=False for CPU and fp16=True for MPS (GPU) to maximize speed.
+    use_fp16 = True if device == "mps" else False
+    
     try:
-        print(f"🧠 Attempting transcription on {device}...")
+        print(f"🧠 Attempting transcription on {device} (FP16={use_fp16})...")
         model = whisper.load_model(model_type, device=device)
         result = model.transcribe(
             audio_file, 
             language="en", 
-            initial_prompt=INITIAL_PROMPT
+            initial_prompt=INITIAL_PROMPT,
+            fp16=use_fp16
         )
     except Exception as e:
-        # Safety fallback: If user set USE_MPS=True but it still fails, use CPU
+        # Step 3: FALLBACK to CPU if MPS fails
         if device == "mps":
             print(f"⚠️ MPS GPU error detected. Falling back to CPU for stability...")
             print(f"Details: {e}")
             device = "cpu"
+            use_fp16 = False # Ensure FP16 is disabled on fallback
             model = whisper.load_model(model_type, device=device)
             result = model.transcribe(
                 audio_file, 
                 language="en", 
-                initial_prompt=INITIAL_PROMPT
+                initial_prompt=INITIAL_PROMPT,
+                fp16=use_fp16
             )
         else:
             print(f"❌ Transcription failed: {e}")
@@ -153,15 +161,11 @@ def transcribe_and_save(audio_file, model_type):
         return
 
     # --- FILENAME SLUG LOGIC ---
-    # 1. Get the first 5 words of the transcription
-    words = text.split()[:5]
-    # 2. Join them with hyphens and lowercase them
-    slug = "-".join(words).lower()
-    # 3. Clean the slug: Remove anything that isn't a letter, number, or hyphen
-    # This prevents errors when the transcription contains '?' or '!'
-    slug = re.sub(r'[^a-z0-9-]', '', slug.replace(' ', '-'))
+    words = text.split()[:5] # first 5 words of transcription
+    slug = "-".join(words).lower() #kebab case
+    slug = re.sub(r'[^a-z0-9-]', '', slug.replace(' ', '-')) # Remove non-word chars
     
-    # Fallback if the slug becomes empty after cleaning
+    # Simple fallback if slug is empty
     if not slug:
         slug = "voice-note"
 
@@ -169,7 +173,6 @@ def transcribe_and_save(audio_file, model_type):
     date_str = now.strftime("%Y-%m-%d")
     timestamp_full = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Construct filename: yyyy-mm-dd-slug.md
     filename = f"{date_str}-{slug}.md"
     filepath = os.path.join(".", filename)
 
@@ -197,7 +200,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 # ================================================================================
 # REQUIREMENTS.TXT
