@@ -14,7 +14,7 @@ REQUIREMENTS
 SETUP (Recommended Workflow):
 Copy and run these commands in your terminal for the first-time setup:
 
-brew install ffmpeg portaudio && \ #
+brew install ffmpeg portaudio && \
 python3 -m venv .venv && \
 source .venv/bin/activate && \
 python -m pip install --upgrade pip && \
@@ -49,18 +49,23 @@ import numpy as np
 import threading
 import time
 import torch  # Required for Mac GPU (MPS) acceleration
+import re     # Required for cleaning filename slugs
 
 # --- CONFIGURATION ---
 
 # 1. Model Selection
 # 'tiny', 'base', 'small', 'medium', 'large-v3'
-# 'medium' is recommended for high accuracy.
-WHISPER_MODEL_TYPE = "medium"
+WHISPER_MODEL_TYPE = "large-v3"
 
-# 2. Transcription Context (Improves spelling of specific terms)
+# 2. Hardware Acceleration
+# Set to False to skip the MPS check and go straight to CPU (saves time on Mac)
+# Set to True to attempt to use the Mac GPU
+USE_MPS = False
+
+# 3. Transcription Context (Improves spelling of specific terms)
 INITIAL_PROMPT = "Python, Vim, Markdown, coding, and technical documentation."
 
-# 3. Audio Settings
+# 4. Audio Settings
 MAX_RECORDING_SECONDS = 600 
 SAMPLE_RATE = 16000  # Optimized for Speech-to-Text AI (standard is 16kHz)
 
@@ -111,8 +116,11 @@ def record_audio(max_duration, filename):
     return True
 
 def transcribe_and_save(audio_file, model_type):
-    # Step 1: Try to use Mac GPU (MPS)
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    # Determine device based on user preference and availability
+    if USE_MPS and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
     
     try:
         print(f"🧠 Attempting transcription on {device}...")
@@ -123,7 +131,7 @@ def transcribe_and_save(audio_file, model_type):
             initial_prompt=INITIAL_PROMPT
         )
     except Exception as e:
-        # Step 2: FALLBACK to CPU if MPS fails (prevents common Mac GPU errors)
+        # Safety fallback: If user set USE_MPS=True but it still fails, use CPU
         if device == "mps":
             print(f"⚠️ MPS GPU error detected. Falling back to CPU for stability...")
             print(f"Details: {e}")
@@ -144,15 +152,25 @@ def transcribe_and_save(audio_file, model_type):
         print("⚠️ No speech detected.")
         return
 
+    # --- FILENAME SLUG LOGIC ---
+    # 1. Get the first 5 words of the transcription
+    words = text.split()[:5]
+    # 2. Join them with hyphens and lowercase them
+    slug = "-".join(words).lower()
+    # 3. Clean the slug: Remove anything that isn't a letter, number, or hyphen
+    # This prevents errors when the transcription contains '?' or '!'
+    slug = re.sub(r'[^a-z0-9-]', '', slug.replace(' ', '-'))
+    
+    # Fallback if the slug becomes empty after cleaning
+    if not slug:
+        slug = "voice-note"
+
     now = datetime.datetime.now()
     date_str = now.strftime("%Y-%m-%d")
     timestamp_full = now.strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Get the last 2 digits of the current Unix Epoch to prevent collisions
-    unix_suffix = str(int(time.time()))[-2:]
 
-    # Construct filename: yyyy-mm-dd-title-here-%s.md
-    filename = f"{date_str}-title-here-{unix_suffix}.md"
+    # Construct filename: yyyy-mm-dd-slug.md
+    filename = f"{date_str}-{slug}.md"
     filepath = os.path.join(".", filename)
 
     try:
