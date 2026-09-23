@@ -1,10 +1,5 @@
-# Core AI Transcription
 openai-whisper
-
-# Audio Recording and Processing
 sounddevice
 scipy
 numpy
-
-# Note: Do NOT install 'whisper'. 
-# Use 'openai-whisper' as listed above to avoid errors.
+torch
